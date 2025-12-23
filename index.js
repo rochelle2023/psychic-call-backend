@@ -1,23 +1,24 @@
 const express = require('express');
-const VoiceResponse = require('twilio').twiml.VoiceResponse;
 const app = express();
+const port = process.env.PORT || 10000;
 
 app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
-app.post('/voice/psychic', (req, res) => {
-  const twiml = new VoiceResponse();
-
-  twiml.say({ voice: 'Polly.Joanna' }, "Welcome. Let me tune into your energy...");
-
-  twiml.start().stream({
-    url: 'wss://yourdomain.com/ai-stream' // You’ll plug in your real stream URL later
-  });
-
-  res.type('text/xml');
-  res.send(twiml.toString());
+app.get('/', (req, res) => {
+  res.send('AI Psychic backend is running!');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Psychic call backend running on port ${PORT}`);
+app.post('/voice', (req, res) => {
+  const twiml = `
+    <Response>
+      <Say>Hello. This is your AI Psychic. Let me look into the energy for a moment...</Say>
+    </Response>
+  `;
+  res.type('text/xml');
+  res.send(twiml);
+});
+
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });
