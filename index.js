@@ -1,12 +1,3 @@
-app.post('/voice', (req, res) => {
-  const twiml = `
-    <Response>
-      <Say>Hello. This is your AI Psychic speaking. Let me check the energy real quick.</Say>
-    </Response>
-  `;
-  res.type('text/xml');
-  res.send(twiml);
-});
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
@@ -14,10 +5,12 @@ const port = process.env.PORT || 10000;
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+// Default homepage check
 app.get('/', (req, res) => {
   res.send('AI Psychic backend is running!');
 });
 
+// Twilio voice webhook
 app.post('/voice', (req, res) => {
   const twiml = `
     <Response>
@@ -28,7 +21,7 @@ app.post('/voice', (req, res) => {
   res.send(twiml);
 });
 
+// Start server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
-
