@@ -22,16 +22,19 @@ app.get("/", (req, res) => {
  * ============================
  */
 app.post("/twilio/answer", (req, res) => {
-  res.type("text/xml");
-  res.send(`
-    <Response>
-      <Say voice="alice">I'm listening.</Say>
-      <Start>
-        <Stream url="wss://${req.headers.host}" />
-      </Start>
-    </Response>
-  `);
-});
+res.type("text/xml");
+res.send(`
+  <Response>
+    <Say voice="alice">I'm listening.</Say>
+
+    <Start>
+      <Stream url="wss://${req.headers.host}" />
+    </Start>
+
+    <!-- KEEP THE CALL OPEN -->
+    <Pause length="600" />
+  </Response>
+`);
 
 /**
  * ============================
