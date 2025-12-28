@@ -1,7 +1,6 @@
 const express = require("express");
 const WebSocket = require("ws");
 const http = require("http");
-const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -11,7 +10,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 /* ================================
-   TWILIO ANSWER (START STREAM)
+   TWILIO ANSWER
 ================================ */
 app.post("/twilio/answer", (req, res) => {
   res.type("text/xml");
@@ -34,10 +33,10 @@ wss.on("connection", (twilioSocket) => {
   let deepgramSocket;
   let transcriptBuffer = "";
   let silenceTimer = null;
-  let speaking = false;
+  let aiSpeaking = false;
 
   /* ================================
-     CONNECT TO DEEPGRAM STT
+     DEEPGRAM STT
   ================================ */
   deepgramSocket = new WebSocket(
     "wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true",
@@ -52,7 +51,7 @@ wss.on("connection", (twilioSocket) => {
     console.log("🎧 Deepgram connected");
   });
 
-  deepgramSocket.on("message", (msg) => {
+  deepgramSocket.on("message", async (msg) => {
     const data = JSON.parse(msg);
     const transcript =
       data.channel?.alternatives?.[0]?.transcript || "";
@@ -62,20 +61,19 @@ wss.on("connection", (twilioSocket) => {
     console.log("📝 TRANSCRIPT:", transcript);
     transcriptBuffer = transcript;
 
-    // Reset silence timer
     if (silenceTimer) clearTimeout(silenceTimer);
 
     silenceTimer = setTimeout(async () => {
-      if (!transcriptBuffer || speaking) return;
+      if (!transcriptBuffer || aiSpeaking) return;
 
-      speaking = true;
+      aiSpeaking = true;
       const userText = transcriptBuffer;
       transcriptBuffer = "";
 
       console.log("🧠 AI responding to:", userText);
 
       /* ================================
-         OPENAI RESPONSE
+         OPENAI
       ================================ */
       const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -89,7 +87,7 @@ wss.on("connection", (twilioSocket) => {
             {
               role: "system",
               content:
-                "You are a warm, emotionally intuitive psychic. Speak naturally, gently, and conversationally.",
+                "You are a warm, intuitive psychic. Speak gently, naturally, and conversationally.",
             },
             { role: "user", content: userText },
           ],
@@ -104,7 +102,7 @@ wss.on("connection", (twilioSocket) => {
       console.log("🔊 AI says:", aiText);
 
       /* ================================
-         DEEPGRAM TTS (STREAM BACK)
+         DEEPGRAM TTS
       ================================ */
       const ttsRes = await fetch(
         "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
@@ -131,12 +129,12 @@ wss.on("connection", (twilioSocket) => {
         );
       }
 
-      speaking = false;
-    }, 900); // 👈 PAUSE DETECTION (900ms)
+      aiSpeaking = false;
+    }, 900);
   });
 
   /* ================================
-     RECEIVE AUDIO FROM TWILIO
+     RECEIVE TWILIO AUDIO
   ================================ */
   twilioSocket.on("message", (msg) => {
     const data = JSON.parse(msg);
@@ -164,7 +162,7 @@ wss.on("connection", (twilioSocket) => {
 });
 
 /* ================================
-   SERVER START
+   SERVER
 ================================ */
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
