@@ -3,97 +3,69 @@ const http = require("http");
 const WebSocket = require("ws");
 
 const app = express();
+app.use(express.urlencoded({ extended: false }));
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 10000;
-
-// Twilio sends form-encoded data
-app.use(express.urlencoded({ extended: false }));
-
-// Health check
-app.get("/", (req, res) => {
-  res.send("Psychic streaming backend is running.");
-});
-
 /**
- * ============================
  * TWILIO ANSWER WEBHOOK
- * ============================
  */
 app.post("/twilio/answer", (req, res) => {
-res.type("text/xml");
-res.send(`
-  <Response>
-    <Say voice="alice">I'm listening.</Say>
+  res.type("text/xml");
+  res.send(`
+<Response>
+  <Say voice="alice">I'm listening.</Say>
 
-    <Start>
-      <Stream url="wss://${req.headers.host}" />
-    </Start>
+  <Start>
+    <Stream url="wss://${req.headers.host}" />
+  </Start>
 
-    <!-- KEEP THE CALL OPEN -->
-    <Pause length="600" />
-  </Response>
-`);
+  <Pause length="600" />
+</Response>
+  `);
+});
 
 /**
- * ============================
- * WEBSOCKET: TWILIO AUDIO IN
- * ============================
+ * WEBSOCKET — RECEIVES LIVE AUDIO
  */
-wss.on("connection", (twilioSocket) => {
+wss.on("connection", (ws) => {
   console.log("📞 Twilio WebSocket connected");
 
-  const deepgramSocket = new WebSocket(
-    "wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000&channels=1",
-    {
-      headers: {
-        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
-      },
-    }
-  );
+  ws.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg);
 
-  deepgramSocket.on("open", () => {
-    console.log("🟢 Deepgram connected");
-  });
+      if (data.event === "media") {
+        console.log("🎧 Caller audio packet received");
+      }
 
-  deepgramSocket.on("message", (data) => {
-    const msg = JSON.parse(data.toString());
-    const transcript =
-      msg.channel?.alternatives?.[0]?.transcript;
+      if (data.event === "start") {
+        console.log("▶️ Stream started");
+      }
 
-    if (transcript && transcript.trim() !== "") {
-      console.log("🗣️ CALLER SAID:", transcript);
+      if (data.event === "stop") {
+        console.log("⏹️ Stream stopped");
+      }
+    } catch (err) {
+      console.error("WebSocket parse error:", err.message);
     }
   });
 
-  deepgramSocket.on("error", (err) => {
-    console.error("🔴 Deepgram error:", err);
-  });
-
-  twilioSocket.on("message", (message) => {
-    const msg = JSON.parse(message);
-
-    if (msg.event === "media") {
-      deepgramSocket.send(
-        Buffer.from(msg.media.payload, "base64")
-      );
-    }
-
-    if (msg.event === "stop") {
-      console.log("📴 Call ended");
-      deepgramSocket.close();
-    }
-  });
-
-  twilioSocket.on("close", () => {
-    console.log("❌ Twilio WebSocket closed");
-    deepgramSocket.close();
+  ws.on("close", () => {
+    console.log("❌ WebSocket closed");
   });
 });
 
-// Start server
+/**
+ * BASIC HEALTH CHECK
+ */
+app.get("/", (req, res) => {
+  res.send("Psychic backend running.");
+});
+
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
 
