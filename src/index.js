@@ -20,9 +20,11 @@ app.post("/twilio/answer", (req, res) => {
       <Start>
         <Stream url="wss://${req.headers.host}" />
       </Start>
+      <Pause length="600" />
     </Response>
   `);
 });
+
 
 /* ================================
    WEBSOCKET HANDLING
