@@ -90,3 +90,13 @@ app.post('/voice', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+app.post('/twilio/answer', (req, res) => {
+  res.type('text/xml');
+  res.send(`
+    <Response>
+      <Say voice="alice">
+        Hello. This is a Twilio test call. Can you hear me?
+      </Say>
+    </Response>
+  `);
+});
