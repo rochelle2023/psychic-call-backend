@@ -8,12 +8,10 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 10000;
 
-// ---- BASIC HEALTH CHECK ----
 app.get("/", (req, res) => {
   res.send("Psychic backend running.");
 });
 
-// ---- TWILIO ANSWER (START STREAM) ----
 app.post("/twilio/answer", (req, res) => {
   res.type("text/xml");
   res.send(`
@@ -26,11 +24,11 @@ app.post("/twilio/answer", (req, res) => {
   `);
 });
 
-// ---- WEBSOCKET HANDLING ----
-wss.on("connection", async (twilioSocket) => {
+wss.on("connection", (twilioSocket) => {
   console.log("🔌 Twilio connected");
 
-  // Connect to Deepgram live transcription
+  let twilioReady = false;
+
   const deepgramSocket = new WebSocket(
     "wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000&punctuate=true",
     {
@@ -48,11 +46,10 @@ wss.on("connection", async (twilioSocket) => {
     const data = JSON.parse(msg.toString());
     const transcript = data.channel?.alternatives?.[0]?.transcript;
 
-    if (!transcript) return;
+    if (!transcript || !twilioReady) return;
 
     console.log("📝 TRANSCRIPT:", transcript);
 
-    // ---- AI THINKING ----
     const aiResponse = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -67,7 +64,7 @@ wss.on("connection", async (twilioSocket) => {
             {
               role: "system",
               content:
-                "You are a warm, intuitive psychic. Speak gently, conversationally, and briefly.",
+                "You are a warm, intuitive psychic. Speak gently and briefly.",
             },
             {
               role: "user",
@@ -85,7 +82,6 @@ wss.on("connection", async (twilioSocket) => {
 
     console.log("🔮 AI:", reply);
 
-    // ---- DEEPGRAM TEXT → SPEECH ----
     const ttsResponse = await fetch(
       "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
       {
@@ -100,19 +96,26 @@ wss.on("connection", async (twilioSocket) => {
 
     const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
 
-    // Send audio back to Twilio
-    twilioSocket.send(
-      JSON.stringify({
-        event: "media",
-        media: {
-          payload: audioBuffer.toString("base64"),
-        },
-      })
-    );
+    if (twilioReady) {
+      twilioSocket.send(
+        JSON.stringify({
+          event: "media",
+          media: {
+            payload: audioBuffer.toString("base64"),
+          },
+        })
+      );
+    }
   });
 
   twilioSocket.on("message", (msg) => {
     const data = JSON.parse(msg.toString());
+
+    if (data.event === "start") {
+      console.log("▶️ Twilio stream started");
+      twilioReady = true;
+    }
+
     if (data.event === "media") {
       const audio = Buffer.from(data.media.payload, "base64");
       deepgramSocket.send(audio);
@@ -125,7 +128,6 @@ wss.on("connection", async (twilioSocket) => {
   });
 });
 
-// ---- START SERVER ----
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
