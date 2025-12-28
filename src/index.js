@@ -96,17 +96,19 @@ wss.on("connection", (twilioSocket) => {
 
     const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
 
-    if (twilioReady) {
-      twilioSocket.send(
-        JSON.stringify({
-          event: "media",
-          media: {
-            payload: audioBuffer.toString("base64"),
-          },
-        })
-      );
-    }
-  });
+    if (twilioReady && twilioSocket.readyState === WebSocket.OPEN) {
+  twilioSocket.send(
+    JSON.stringify({
+      event: "media",
+      media: {
+        payload: audioBuffer.toString("base64"),
+      },
+    })
+  );
+} else {
+  console.log("⏳ Twilio socket not ready yet, skipping audio frame");
+}
+
 
   twilioSocket.on("message", (msg) => {
     const data = JSON.parse(msg.toString());
