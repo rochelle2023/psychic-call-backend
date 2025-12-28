@@ -8,24 +8,18 @@ const PORT = process.env.PORT || 10000;
 
 app.use(express.urlencoded({ extended: false }));
 
-// Serve generated audio
-app.use('/audio', express.static(path.join(__dirname, 'audio')));
+const audioDir = path.join(__dirname, 'audio');
+if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir);
 
-// Health check
+app.use('/audio', express.static(audioDir));
+
 app.get('/', (req, res) => {
   res.send('Psychic backend is running.');
 });
 
-// Ensure audio folder exists
-const audioDir = path.join(__dirname, 'audio');
-if (!fs.existsSync(audioDir)) {
-  fs.mkdirSync(audioDir);
-}
-
-// Twilio voice entry point
 app.post('/twilio/answer', async (req, res) => {
   try {
-    // 1️⃣ Get psychic text
+    // 1️⃣ Get dynamic psychic text
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -38,51 +32,54 @@ app.post('/twilio/answer', async (req, res) => {
           {
             role: 'system',
             content:
-              'You are a warm, reassuring psychic. Speak gently, calmly, and emotionally.',
+              'You are a warm, reassuring psychic. Speak gently, emotionally, and naturally.',
           },
           {
             role: 'user',
             content:
-              'Give a short comforting message to someone who feels uncertain about love.',
+              'Give a short comforting message to someone feeling uncertain about love.',
           },
         ],
-        temperature: 0.8,
+        temperature: 0.9,
         max_tokens: 120,
       }),
     });
 
     const openaiData = await openaiRes.json();
-    const text =
-      openaiData?.choices?.[0]?.message?.content ||
-      'I feel a gentle sense of reassurance around you. Things are unfolding quietly in your favor.';
+    const text = openaiData.choices[0].message.content;
 
-    // 2️⃣ Send text to ElevenLabs (audio file)
+    console.log('Psychic text:', text);
+
+    // 2️⃣ ElevenLabs → MP3 (CORRECT WAY)
     const elevenRes = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}/stream`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          Accept: 'audio/mpeg',
         },
         body: JSON.stringify({
           text,
           model_id: 'eleven_monolingual_v1',
           voice_settings: {
-            stability: 0.35,
-            similarity_boost: 0.75,
+            stability: 0.25,
+            similarity_boost: 0.8,
           },
         }),
       }
     );
 
-    const audioBuffer = await elevenRes.arrayBuffer();
+    if (!elevenRes.ok) {
+      throw new Error('ElevenLabs failed');
+    }
+
+    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
     const fileName = `reading-${Date.now()}.mp3`;
-    const filePath = path.join(audioDir, fileName);
+    fs.writeFileSync(path.join(audioDir, fileName), audioBuffer);
 
-    fs.writeFileSync(filePath, Buffer.from(audioBuffer));
-
-    // 3️⃣ Tell Twilio to play it
+    // 3️⃣ Play realistic voice
     res.type('text/xml');
     res.send(`
       <Response>
@@ -90,12 +87,13 @@ app.post('/twilio/answer', async (req, res) => {
       </Response>
     `);
   } catch (err) {
-    console.error(err);
+    console.error('VOICE ERROR:', err);
+
     res.type('text/xml');
     res.send(`
       <Response>
         <Say voice="alice">
-          I’m here with you. Even when answers feel quiet, trust that things are still unfolding.
+          I’m here with you. Something is gently shifting, even if you can’t see it yet.
         </Say>
       </Response>
     `);
