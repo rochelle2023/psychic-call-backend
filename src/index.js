@@ -1,5 +1,4 @@
 const express = require('express');
-const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 
@@ -19,7 +18,7 @@ app.get('/', (req, res) => {
 
 app.post('/twilio/answer', async (req, res) => {
   try {
-    // 1️⃣ Get dynamic psychic text
+    // 1️⃣ OpenAI text
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -32,15 +31,15 @@ app.post('/twilio/answer', async (req, res) => {
           {
             role: 'system',
             content:
-              'You are a warm, reassuring psychic. Speak gently, emotionally, and naturally.',
+              'You are a warm, reassuring psychic. Speak gently, naturally, and emotionally.',
           },
           {
             role: 'user',
             content:
-              'Give a short comforting message to someone feeling uncertain about love.',
+              'Give a comforting message to someone feeling uncertain about love.',
           },
         ],
-        temperature: 0.9,
+        temperature: 0.95,
         max_tokens: 120,
       }),
     });
@@ -48,9 +47,9 @@ app.post('/twilio/answer', async (req, res) => {
     const openaiData = await openaiRes.json();
     const text = openaiData.choices[0].message.content;
 
-    console.log('Psychic text:', text);
+    console.log('Generated text:', text);
 
-    // 2️⃣ ElevenLabs → MP3 (CORRECT WAY)
+    // 2️⃣ ElevenLabs REAL MP3
     const elevenRes = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}/stream`,
       {
@@ -64,22 +63,22 @@ app.post('/twilio/answer', async (req, res) => {
           text,
           model_id: 'eleven_monolingual_v1',
           voice_settings: {
-            stability: 0.25,
-            similarity_boost: 0.8,
+            stability: 0.2,
+            similarity_boost: 0.85,
           },
         }),
       }
     );
 
     if (!elevenRes.ok) {
-      throw new Error('ElevenLabs failed');
+      throw new Error('ElevenLabs request failed');
     }
 
-    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+    const buffer = Buffer.from(await elevenRes.arrayBuffer());
     const fileName = `reading-${Date.now()}.mp3`;
-    fs.writeFileSync(path.join(audioDir, fileName), audioBuffer);
+    fs.writeFileSync(path.join(audioDir, fileName), buffer);
 
-    // 3️⃣ Play realistic voice
+    // 3️⃣ Play ElevenLabs audio
     res.type('text/xml');
     res.send(`
       <Response>
@@ -93,7 +92,7 @@ app.post('/twilio/answer', async (req, res) => {
     res.send(`
       <Response>
         <Say voice="alice">
-          I’m here with you. Something is gently shifting, even if you can’t see it yet.
+          I’m here with you. Even when things feel unclear, trust that something gentle is unfolding.
         </Say>
       </Response>
     `);
