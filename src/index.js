@@ -29,9 +29,13 @@ app.post("/twilio/answer", (req, res) => {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice">I am listening.</Say>
+
   <Connect>
     <Stream url="wss://psychic-backend.onrender.com/twilio/stream" />
   </Connect>
+
+  <!-- KEEP CALL OPEN -->
+  <Pause length="60" />
 </Response>`;
 
   res.status(200).send(twiml);
