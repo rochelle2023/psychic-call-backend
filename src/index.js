@@ -18,12 +18,11 @@ app.post("/twilio/answer", (req, res) => {
     <Response>
       <Say voice="alice">I'm listening.</Say>
       <Connect>
-        <Stream url="wss://${req.headers.host}" />
+        <Stream url="wss://psychic-backend.onrender.com/media" />
       </Connect>
     </Response>
   `);
 });
-
 
 /* ===============================
    HTTP SERVER
