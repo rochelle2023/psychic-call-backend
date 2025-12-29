@@ -1,49 +1,36 @@
-
 import express from "express";
 import http from "http";
 import WebSocket, { WebSocketServer } from "ws";
 
 const app = express();
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 10000;
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
 
-/* =========================
-   TWILIO ANSWER WEBHOOK
-========================= */
+/* ================================
+   TWILIO ANSWER (VOICE WEBHOOK)
+================================ */
 app.post("/twilio/answer", (req, res) => {
   res.type("text/xml");
   res.send(`
-    <Response>
-      <Say voice="alice">I'm listening.</Say>
-      <Connect>
-        <Stream url="wss://psychic-backend.onrender.com/media" />
-      </Connect>
-    </Response>
+<Response>
+  <Say voice="Polly.Joanna">I am listening.</Say>
+  <Connect>
+    <Stream url="wss://${req.headers.host}/twilio/stream" />
+  </Connect>
+</Response>
   `);
 });
 
-/* =========================
-   HTTP SERVER
-========================= */
-const server = http.createServer(app);
-
-/* =========================
-   WEBSOCKET SERVER (TWILIO)
-========================= */
-const wss = new WebSocketServer({
-  server,
-  path: "/media",
-});
-
-wss.on("connection", (twilioWs) => {
+/* ================================
+   WEBSOCKET HANDLER
+================================ */
+wss.on("connection", async (twilioWS) => {
   console.log("📞 Twilio WebSocket connected");
 
-  /* =========================
-     CONNECT TO DEEPGRAM (RAW WS)
-  ========================= */
-  const deepgramWs = new WebSocket(
-    "wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000&channels=1",
+  const deepgramWS = new WebSocket(
+    "wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000",
     {
       headers: {
         Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
@@ -51,48 +38,101 @@ wss.on("connection", (twilioWs) => {
     }
   );
 
-  deepgramWs.on("open", () => {
+  deepgramWS.on("open", () => {
     console.log("🎧 Deepgram connected");
   });
 
-  deepgramWs.on("message", (msg) => {
-    const data = JSON.parse(msg.toString());
+  deepgramWS.on("message", async (msg) => {
+    const data = JSON.parse(msg);
+    const transcript = data.channel?.alternatives?.[0]?.transcript;
 
-    const transcript =
-      data.channel?.alternatives?.[0]?.transcript;
+    if (!transcript) return;
 
-    if (transcript) {
-      console.log("📝 TRANSCRIPT:", transcript);
-    }
+    console.log("📝 TRANSCRIPT:", transcript);
+
+    /* ================================
+       GPT RESPONSE
+    ================================ */
+    const gptResponse = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a warm, intuitive psychic reader. Respond briefly and naturally.",
+            },
+            { role: "user", content: transcript },
+          ],
+        }),
+      }
+    );
+
+    const gptData = await gptResponse.json();
+    const reply =
+      gptData.choices?.[0]?.message?.content ||
+      "I sense something unfolding.";
+
+    console.log("🤖 AI:", reply);
+
+    /* ================================
+       DEEPGRAM TTS
+    ================================ */
+    const tts = await fetch(
+      "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: reply }),
+      }
+    );
+
+    const audioBuffer = Buffer.from(await tts.arrayBuffer());
+
+    twilioWS.send(
+      JSON.stringify({
+        event: "media",
+        media: {
+          payload: audioBuffer.toString("base64"),
+        },
+      })
+    );
   });
 
-  deepgramWs.on("error", (err) => {
-    console.error("❌ Deepgram error:", err);
-  });
-
-  /* =========================
-     RECEIVE AUDIO FROM TWILIO
-  ========================= */
-  twilioWs.on("message", (msg) => {
-    const data = JSON.parse(msg.toString());
+  /* ================================
+     AUDIO FROM TWILIO → DEEPGRAM
+  ================================ */
+  twilioWS.on("message", (msg) => {
+    const data = JSON.parse(msg);
 
     if (data.event === "media") {
-      const audio = Buffer.from(data.media.payload, "base64");
-      if (deepgramWs.readyState === WebSocket.OPEN) {
-        deepgramWs.send(audio);
+      if (deepgramWS.readyState === WebSocket.OPEN) {
+        deepgramWS.send(Buffer.from(data.media.payload, "base64"));
       }
     }
   });
 
-  twilioWs.on("close", () => {
-    console.log("☎️ Twilio disconnected");
-    deepgramWs.close();
+  twilioWS.on("close", () => {
+    console.log("❌ Twilio disconnected");
+    deepgramWS.close();
   });
 });
 
-/* =========================
-   START SERVER
-========================= */
+/* ================================
+   SERVER START
+================================ */
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
