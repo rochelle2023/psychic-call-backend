@@ -17,10 +17,13 @@ app.post("/twilio/answer", (req, res) => {
   res.send(`
     <Response>
       <Say voice="alice">I'm listening.</Say>
-      <Pause length="600"/>
+      <Connect>
+        <Stream url="wss://${req.headers.host}" />
+      </Connect>
     </Response>
   `);
 });
+
 
 /* ===============================
    HTTP SERVER
