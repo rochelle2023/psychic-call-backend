@@ -5,43 +5,40 @@ const http = require("http");
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 
-const PORT = process.env.PORT || 10000;
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-/* ================================
-   TWILIO ANSWER
-================================ */
+/**
+ * ---------------------------
+ * TWILIO ANSWER ENDPOINT
+ * ---------------------------
+ */
 app.post("/twilio/answer", (req, res) => {
   res.type("text/xml");
   res.send(`
     <Response>
-      <Say>I'm listening.</Say>
-      <Start>
-        <Stream url="wss://${req.headers.host}" />
-      </Start>
-      <Pause length="600" />
+      <Say>I’m listening.</Say>
+      <Connect>
+        <Stream url="wss://${req.headers.host}/twilio-stream" />
+      </Connect>
     </Response>
   `);
 });
 
-
-/* ================================
-   WEBSOCKET HANDLING
-================================ */
+/**
+ * ---------------------------
+ * WEBSOCKET: TWILIO STREAM
+ * ---------------------------
+ */
 wss.on("connection", (twilioSocket) => {
   console.log("📞 Twilio connected");
 
   let deepgramSocket;
-  let transcriptBuffer = "";
-  let silenceTimer = null;
-  let aiSpeaking = false;
+  let finalTranscript = "";
 
-  /* ================================
-     DEEPGRAM STT
-  ================================ */
+  // Connect to Deepgram
   deepgramSocket = new WebSocket(
-    "wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true",
+    "wss://api.deepgram.com/v1/listen?encoding=mulaw&sample_rate=8000&channels=1",
     {
       headers: {
         Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
@@ -50,122 +47,66 @@ wss.on("connection", (twilioSocket) => {
   );
 
   deepgramSocket.on("open", () => {
-    console.log("🎧 Deepgram connected");
+    console.log("🧠 Deepgram connected");
   });
 
-  deepgramSocket.on("message", async (msg) => {
-    const data = JSON.parse(msg);
-    const transcript =
-      data.channel?.alternatives?.[0]?.transcript || "";
+  deepgramSocket.on("message", (data) => {
+    const dg = JSON.parse(data);
+    const transcript = dg.channel?.alternatives?.[0]?.transcript;
 
-    if (!transcript) return;
+    if (transcript) {
+      console.log("📝 TRANSCRIPT:", transcript);
+      finalTranscript += " " + transcript;
+    }
 
-    console.log("📝 TRANSCRIPT:", transcript);
-    transcriptBuffer = transcript;
-
-    if (silenceTimer) clearTimeout(silenceTimer);
-
-    silenceTimer = setTimeout(async () => {
-      if (!transcriptBuffer || aiSpeaking) return;
-
-      aiSpeaking = true;
-      const userText = transcriptBuffer;
-      transcriptBuffer = "";
-
-      console.log("🧠 AI responding to:", userText);
-
-      /* ================================
-         OPENAI
-      ================================ */
-      const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a warm, intuitive psychic. Speak gently, naturally, and conversationally.",
-            },
-            { role: "user", content: userText },
-          ],
-          temperature: 0.9,
-          max_tokens: 120,
-        }),
-      });
-
-      const aiData = await aiRes.json();
-      const aiText = aiData.choices[0].message.content;
-
-      console.log("🔊 AI says:", aiText);
-
-      /* ================================
-         DEEPGRAM TTS
-      ================================ */
-      const ttsRes = await fetch(
-        "https://api.deepgram.com/v1/speak?model=aura-asteria-en",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ text: aiText }),
-        }
-      );
-
-      const audioBuffer = Buffer.from(await ttsRes.arrayBuffer());
-
-      if (twilioSocket.readyState === WebSocket.OPEN) {
-        twilioSocket.send(
-          JSON.stringify({
-            event: "media",
-            media: {
-              payload: audioBuffer.toString("base64"),
-            },
-          })
-        );
-      }
-
-      aiSpeaking = false;
-    }, 900);
+    // When Deepgram marks speech as final → respond
+    if (dg.is_final && finalTranscript.trim()) {
+      speakBack(finalTranscript.trim(), twilioSocket);
+      finalTranscript = "";
+    }
   });
 
-  /* ================================
-     RECEIVE TWILIO AUDIO
-  ================================ */
   twilioSocket.on("message", (msg) => {
-    const data = JSON.parse(msg);
+    const event = JSON.parse(msg);
 
-    if (data.event === "media") {
+    if (event.event === "media") {
       if (deepgramSocket.readyState === WebSocket.OPEN) {
-        deepgramSocket.send(Buffer.from(data.media.payload, "base64"));
+        const audio = Buffer.from(event.media.payload, "base64");
+        deepgramSocket.send(audio);
       }
     }
 
-    if (data.event === "start") {
-      console.log("▶️ Twilio stream started");
-    }
-
-    if (data.event === "stop") {
-      console.log("⛔ Call ended");
+    if (event.event === "stop") {
+      console.log("📴 Call ended");
       deepgramSocket.close();
     }
   });
 
   twilioSocket.on("close", () => {
-    console.log("📴 Twilio disconnected");
-    if (deepgramSocket) deepgramSocket.close();
+    console.log("❌ Twilio disconnected");
+    deepgramSocket.close();
   });
 });
 
-/* ================================
-   SERVER
-================================ */
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+/**
+ * ---------------------------
+ * AI RESPONSE (TEXT ONLY FOR NOW)
+ * ---------------------------
+ */
+async function speakBack(text, twilioSocket) {
+  console.log("🤖 AI responding to:", text);
+
+  // For Phase II, we only log the AI response
+  // Phase III will turn this into speech
+  const response = `I hear you. You said: ${text}`;
+  console.log("🗣️ AI:", response);
+}
+
+/**
+ * ---------------------------
+ * START SERVER
+ * ---------------------------
+ */
+server.listen(10000, () => {
+  console.log("🚀 Server running on port 10000");
 });
